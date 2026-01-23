@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'leader_controller = platoon_control.leader_controller:main',
+            'follower_controller = platoon_control.follower_controller:main', # <--- ADD THIS LINE
         ],
     },
 )
