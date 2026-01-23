@@ -1,0 +1,101 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <model name="platoon_bot">
+    <static>false</static>
+
+    <link name="base_link">
+      <pose>0 0 0.1 0 0 0</pose>
+
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>0.4 0.3 0.15</size>
+          </box>
+        </geometry>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>0.4 0.3 0.15</size>
+          </box>
+        </geometry>
+      </visual>
+
+      <inertial>
+        <mass>5.0</mass>
+      </inertial>
+    </link>
+
+    <link name="left_wheel">
+      <pose>0 0.15 0.05 0 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <cylinder>
+            <radius>0.06</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.06</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+      </visual>
+    </link>
+
+    <link name="right_wheel">
+      <pose>0 -0.15 0.05 0 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <cylinder>
+            <radius>0.06</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.06</radius>
+            <length>0.05</length>
+          </cylinder>
+        </geometry>
+      </visual>
+    </link>
+
+    <joint name="left_wheel_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>left_wheel</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+      </axis>
+    </joint>
+
+    <joint name="right_wheel_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>right_wheel</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+      </axis>
+    </joint>
+
+    <!-- THIS IS WHAT YOU WERE MISSING -->
+    <plugin
+      filename="gz-sim-diff-drive-system"
+      name="gz::sim::systems::DiffDrive">
+
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+
+      <wheel_separation>0.30</wheel_separation>
+      <wheel_radius>0.06</wheel_radius>
+
+      <topic>cmd_vel</topic>
+    </plugin>
+
+  </model>
+</sdf>

@@ -1,0 +1,27 @@
+# ROS 2 build artifacts
+build/
+install/
+log/
+
+# Colcon
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# VS Code / IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Gazebo cache
+~/.gazebo/
+~/.ignition/
+
+# Python virtual environments
+venv/
+.env/
