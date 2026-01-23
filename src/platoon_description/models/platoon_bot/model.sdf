@@ -20,15 +20,28 @@
             <size>0.4 0.3 0.15</size>
           </box>
         </geometry>
+        <material>
+          <ambient>0.0 0.0 1.0 1</ambient>
+          <diffuse>0.0 0.0 1.0 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+        </material>
       </visual>
 
       <inertial>
         <mass>5.0</mass>
+        <inertia>
+          <ixx>0.04</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.07</iyy>
+          <iyz>0</iyz>
+          <izz>0.09</izz>
+        </inertia>
       </inertial>
     </link>
 
     <link name="left_wheel">
-      <pose>0 0.15 0.05 0 0 0</pose>
+      <pose>0 0.15 0.05 -1.5707 0 0</pose>
       <collision name="collision">
         <geometry>
           <cylinder>
@@ -44,11 +57,26 @@
             <length>0.05</length>
           </cylinder>
         </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient>
+          <diffuse>0.1 0.1 0.1 1</diffuse>
+        </material>
       </visual>
+      <inertial>
+        <mass>0.5</mass>
+        <inertia>
+          <ixx>0.001</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.001</iyy>
+          <iyz>0</iyz>
+          <izz>0.001</izz>
+        </inertia>
+      </inertial>
     </link>
 
     <link name="right_wheel">
-      <pose>0 -0.15 0.05 0 0 0</pose>
+      <pose>0 -0.15 0.05 -1.5707 0 0</pose>
       <collision name="collision">
         <geometry>
           <cylinder>
@@ -64,14 +92,29 @@
             <length>0.05</length>
           </cylinder>
         </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient>
+          <diffuse>0.1 0.1 0.1 1</diffuse>
+        </material>
       </visual>
+      <inertial>
+        <mass>0.5</mass>
+        <inertia>
+          <ixx>0.001</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.001</iyy>
+          <iyz>0</iyz>
+          <izz>0.001</izz>
+        </inertia>
+      </inertial>
     </link>
 
     <joint name="left_wheel_joint" type="revolute">
       <parent>base_link</parent>
       <child>left_wheel</child>
       <axis>
-        <xyz>0 1 0</xyz>
+        <xyz>0 0 1</xyz>
       </axis>
     </joint>
 
@@ -79,23 +122,22 @@
       <parent>base_link</parent>
       <child>right_wheel</child>
       <axis>
-        <xyz>1 0 0</xyz>
+        <xyz>0 0 1</xyz>
       </axis>
     </joint>
 
-    <!-- THIS IS WHAT YOU WERE MISSING -->
     <plugin
       filename="gz-sim-diff-drive-system"
       name="gz::sim::systems::DiffDrive">
-
       <left_joint>left_wheel_joint</left_joint>
       <right_joint>right_wheel_joint</right_joint>
-
       <wheel_separation>0.30</wheel_separation>
       <wheel_radius>0.06</wheel_radius>
-
       <topic>cmd_vel</topic>
+      <odom_topic>odometry</odom_topic>
+      <tf_topic>tf</tf_topic>
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_link</child_frame_id>
     </plugin>
-
   </model>
 </sdf>
