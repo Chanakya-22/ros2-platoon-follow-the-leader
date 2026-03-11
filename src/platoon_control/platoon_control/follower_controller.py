@@ -9,12 +9,18 @@ class FollowerController(Node):
     def __init__(self):
         super().__init__('follower_controller')
 
-        # --- Parameters ---
-        self.lookahead_dist = 0.5   # How far ahead on the path to aim (meters)
-        self.stop_dist = 0.6        # Distance to stop behind the leader (meters)
-        self.k_v = 1.0              # Proportional gain for linear velocity
-        self.k_w = 4.0              # Proportional gain for angular velocity
-        
+        # Declare parameters (so they can be set from launch file)
+        self.declare_parameter('lookahead_dist', 1.0)   # metres
+        self.declare_parameter('stop_dist', 1.0)       # metres
+        self.declare_parameter('k_v', 0.8)              # linear velocity gain
+        self.declare_parameter('k_w', 1.2)              # angular velocity gain
+
+        # Get parameter values
+        self.lookahead_dist = self.get_parameter('lookahead_dist').value
+        self.stop_dist = self.get_parameter('stop_dist').value
+        self.k_v = self.get_parameter('k_v').value
+        self.k_w = self.get_parameter('k_w').value
+
         # --- State ---
         self.path = []              # List of (x, y) tuples
         self.leader_pose = None
@@ -22,17 +28,22 @@ class FollowerController(Node):
 
         # --- Subscribers & Publishers ---
         # Note: Topics are remapped in the launch file
-        self.create_subscription(Odometry, '/leader/odom', self.leader_callback, 10)
-        self.create_subscription(Odometry, '/follower/odom', self.follower_callback, 10)
-        self.cmd_vel_pub = self.create_publisher(Twist, '/follower/cmd_vel', 10)
+        self.create_subscription(Odometry, 'leader_odom', self.leader_callback, 10)
+        self.create_subscription(Odometry, 'follower_odom', self.follower_callback, 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel', 10)
 
         # Control loop at 20Hz
         self.timer = self.create_timer(0.05, self.control_loop)
 
+        self.get_logger().info(
+            f'Follower controller started: lookahead={self.lookahead_dist}, '
+            f'k_v={self.k_v}, k_w={self.k_w}'
+        )
+
     def leader_callback(self, msg):
         self.leader_pose = msg.pose.pose
         position = self.leader_pose.position
-        
+
         # Record path points
         if not self.path:
             self.path.append((position.x, position.y))
@@ -65,21 +76,21 @@ class FollowerController(Node):
         # Find the index of the closest point on the path to the follower
         closest_idx = 0
         min_dist = float('inf')
-        
+
         for i, (px, py) in enumerate(self.path):
             dist = math.sqrt((px - fx)**2 + (py - fy)**2)
             if dist < min_dist:
                 min_dist = dist
                 closest_idx = i
-        
+
         # Keep points starting from the closest one
-        # Safety: Don't delete the whole path if we are just starting (min_dist check)
-        if min_dist < 1.0:
+        # If the follower is reasonably close to the path or we have a long path, prune it.
+        if min_dist < 2.0 or len(self.path) > 10:
             self.path = self.path[closest_idx:]
 
         # 2. Find Target Point (Pure Pursuit)
-        target_x, target_y = self.path[-1] # Default to the end
-        
+        target_x, target_y = self.path[-1]  # Default to the end
+
         for px, py in self.path:
             dist = math.sqrt((px - fx)**2 + (py - fy)**2)
             if dist > self.lookahead_dist:
@@ -92,27 +103,47 @@ class FollowerController(Node):
 
         if dist_to_leader > self.stop_dist:
             # Calculate heading to target
-            angle_to_target = math.atan2(target_y - fy, target_x - fx)
+            dx = target_x - fx
+            dy = target_y - fy
+            angle_to_target = math.atan2(dy, dx)
             yaw = self.get_yaw(self.follower_pose.orientation)
-            
+
             # Normalize angle error (-pi to pi)
             angle_err = angle_to_target - yaw
-            while angle_err > math.pi: angle_err -= 2 * math.pi
-            while angle_err < -math.pi: angle_err += 2 * math.pi
+            while angle_err > math.pi:
+                angle_err -= 2 * math.pi
+            while angle_err < -math.pi:
+                angle_err += 2 * math.pi
+
+            # Debug the angles (uncomment for troubleshooting)
+            # self.get_logger().info(f'Target: ({target_x:.2f}, {target_y:.2f}), Follower: ({fx:.2f}, {fy:.2f})')
+            # self.get_logger().info(f'Yaw: {yaw:.2f}, Target Yaw: {angle_to_target:.2f}, Err: {angle_err:.2f}')
 
             # Set velocities
             # Limit linear speed based on distance (slow down as we get closer)
-            cmd.linear.x = self.k_v * min(dist_to_leader - self.stop_dist, 1.0)
-            cmd.angular.z = self.k_w * angle_err
+            lin_x = self.k_v * (dist_to_leader - self.stop_dist)
+            cmd.linear.x = max(0.0, min(lin_x, 1.0))
+
+            # Constrain angular velocity to prevent wild spinning
+            ang_z = self.k_w * angle_err
+            cmd.angular.z = max(-2.0, min(ang_z, 2.0))
+
+            # self.get_logger().info(f'Moving - Dist: {dist_to_leader:.2f}, Target: {cmd.linear.x:.2f}')
         else:
             # Stop if too close
             cmd.linear.x = 0.0
             cmd.angular.z = 0.0
+            # self.get_logger().info(f'Stopping - Dist: {dist_to_leader:.2f}')
 
         self.cmd_vel_pub.publish(cmd)
+
 
 def main(args=None):
     rclpy.init(args=args)
     node = FollowerController()
     rclpy.spin(node)
     rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

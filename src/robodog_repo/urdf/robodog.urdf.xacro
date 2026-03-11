@@ -1,0 +1,383 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="robodog">
+
+  <!-- ==================== PROPERTIES ==================== -->
+  <xacro:property name="body_length" value="0.4"/>
+  <xacro:property name="body_width" value="0.2"/>
+  <xacro:property name="body_height" value="0.1"/>
+  <xacro:property name="body_mass" value="3.0"/>
+
+  <xacro:property name="head_length" value="0.1"/>
+  <xacro:property name="head_width" value="0.12"/>
+  <xacro:property name="head_height" value="0.08"/>
+  <xacro:property name="head_mass" value="0.3"/>
+
+  <xacro:property name="camera_size" value="0.02"/>
+  <xacro:property name="camera_mass" value="0.01"/>
+
+  <xacro:property name="upper_leg_radius" value="0.02"/>
+  <xacro:property name="upper_leg_length" value="0.15"/>
+  <xacro:property name="upper_leg_mass" value="0.2"/>
+
+  <xacro:property name="lower_leg_radius" value="0.015"/>
+  <xacro:property name="lower_leg_length" value="0.15"/>
+  <xacro:property name="lower_leg_mass" value="0.1"/>
+
+  <!-- Foot (small sphere at end of each lower leg for ground contact) -->
+  <xacro:property name="foot_radius" value="0.02"/>
+  <xacro:property name="foot_mass" value="0.05"/>
+
+  <!-- ==================== MACROS ==================== -->
+
+  <!-- Inertia for a box -->
+  <xacro:macro name="box_inertia" params="m x y z">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia ixx="${(1.0/12.0)*m*(y*y+z*z)}" ixy="0.0" ixz="0.0"
+               iyy="${(1.0/12.0)*m*(x*x+z*z)}" iyz="0.0"
+               izz="${(1.0/12.0)*m*(x*x+y*y)}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- Inertia for a cylinder -->
+  <xacro:macro name="cylinder_inertia" params="m r l">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia ixx="${(1.0/12.0)*m*(3*r*r+l*l)}" ixy="0.0" ixz="0.0"
+               iyy="${(1.0/12.0)*m*(3*r*r+l*l)}" iyz="0.0"
+               izz="${(1.0/2.0)*m*r*r}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- Inertia for a sphere -->
+  <xacro:macro name="sphere_inertia" params="m r">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia ixx="${(2.0/5.0)*m*r*r}" ixy="0.0" ixz="0.0"
+               iyy="${(2.0/5.0)*m*r*r}" iyz="0.0"
+               izz="${(2.0/5.0)*m*r*r}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- Leg macro: upper + lower leg + foot, with hip & knee joints + position controllers -->
+  <xacro:macro name="leg" params="prefix x_offset y_offset">
+    <!-- Upper leg -->
+    <link name="${prefix}_upper_leg">
+      <visual>
+        <geometry>
+          <cylinder radius="${upper_leg_radius}" length="${upper_leg_length}"/>
+        </geometry>
+        <origin xyz="0 0 ${-upper_leg_length/2}" rpy="0 0 0"/>
+        <material name="dark_grey">
+          <color rgba="0.3 0.3 0.3 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <cylinder radius="${upper_leg_radius}" length="${upper_leg_length}"/>
+        </geometry>
+        <origin xyz="0 0 ${-upper_leg_length/2}" rpy="0 0 0"/>
+      </collision>
+      <xacro:cylinder_inertia m="${upper_leg_mass}" r="${upper_leg_radius}" l="${upper_leg_length}"/>
+    </link>
+
+    <joint name="${prefix}_hip_joint" type="revolute">
+      <parent link="base_link"/>
+      <child link="${prefix}_upper_leg"/>
+      <origin xyz="${x_offset} ${y_offset} ${-body_height/2}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit lower="-0.8" upper="0.8" effort="100.0" velocity="10.0"/>
+      <dynamics damping="0.5" friction="0.2"/>
+    </joint>
+
+    <!-- Lower leg -->
+    <link name="${prefix}_lower_leg">
+      <visual>
+        <geometry>
+          <cylinder radius="${lower_leg_radius}" length="${lower_leg_length}"/>
+        </geometry>
+        <origin xyz="0 0 ${-lower_leg_length/2}" rpy="0 0 0"/>
+        <material name="light_grey">
+          <color rgba="0.7 0.7 0.7 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <cylinder radius="${lower_leg_radius}" length="${lower_leg_length}"/>
+        </geometry>
+        <origin xyz="0 0 ${-lower_leg_length/2}" rpy="0 0 0"/>
+      </collision>
+      <xacro:cylinder_inertia m="${lower_leg_mass}" r="${lower_leg_radius}" l="${lower_leg_length}"/>
+    </link>
+
+    <joint name="${prefix}_knee_joint" type="revolute">
+      <parent link="${prefix}_upper_leg"/>
+      <child link="${prefix}_lower_leg"/>
+      <origin xyz="0 0 ${-upper_leg_length}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit lower="-1.5" upper="0.0" effort="100.0" velocity="10.0"/>
+      <dynamics damping="0.5" friction="0.2"/>
+    </joint>
+
+    <!-- Foot (sphere at the bottom of lower leg for stable ground contact) -->
+    <link name="${prefix}_foot">
+      <visual>
+        <geometry>
+          <sphere radius="${foot_radius}"/>
+        </geometry>
+        <material name="rubber_black">
+          <color rgba="0.15 0.15 0.15 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <sphere radius="${foot_radius}"/>
+        </geometry>
+      </collision>
+      <xacro:sphere_inertia m="${foot_mass}" r="${foot_radius}"/>
+    </link>
+
+    <joint name="${prefix}_foot_joint" type="fixed">
+      <parent link="${prefix}_lower_leg"/>
+      <child link="${prefix}_foot"/>
+      <origin xyz="0 0 ${-lower_leg_length}" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Gazebo colors -->
+    <gazebo reference="${prefix}_upper_leg">
+      <material>Gazebo/DarkGrey</material>
+    </gazebo>
+    <gazebo reference="${prefix}_lower_leg">
+      <material>Gazebo/Grey</material>
+    </gazebo>
+    <!-- Foot: high friction for stable ground contact -->
+    <gazebo reference="${prefix}_foot">
+      <material>Gazebo/Black</material>
+      <!-- Legacy tags -->
+      <mu1>1.5</mu1>
+      <mu2>1.5</mu2>
+      <kp>1000000.0</kp>
+      <kd>100.0</kd>
+      <minDepth>0.005</minDepth>
+      
+      <!-- Gazebo Harmonic specific collision params -->
+      <collision>
+        <surface>
+          <friction>
+            <ode>
+              <mu>1.5</mu>
+              <mu2>1.5</mu2>
+            </ode>
+          </friction>
+          <contact>
+            <ode>
+              <kp>1000000.0</kp>
+              <kd>100.0</kd>
+              <min_depth>0.005</min_depth>
+            </ode>
+          </contact>
+        </surface>
+      </collision>
+    </gazebo>
+
+    <!-- Joint position controllers — hold joints at commanded angle (default 0) -->
+    <gazebo>
+      <plugin filename="gz-sim-joint-position-controller-system"
+              name="gz::sim::systems::JointPositionController">
+        <joint_name>${prefix}_hip_joint</joint_name>
+        <topic>/model/robodog/joint/${prefix}_hip_joint/cmd_pos</topic>
+        <p_gain>30</p_gain>
+        <i_gain>0.5</i_gain>
+        <d_gain>1.0</d_gain>
+        <cmd_max>20</cmd_max>
+        <cmd_min>-20</cmd_min>
+        <initial_position>0.0</initial_position>
+      </plugin>
+    </gazebo>
+    <gazebo>
+      <plugin filename="gz-sim-joint-position-controller-system"
+              name="gz::sim::systems::JointPositionController">
+        <joint_name>${prefix}_knee_joint</joint_name>
+        <topic>/model/robodog/joint/${prefix}_knee_joint/cmd_pos</topic>
+        <p_gain>30</p_gain>
+        <i_gain>0.5</i_gain>
+        <d_gain>1.0</d_gain>
+        <cmd_max>20</cmd_max>
+        <cmd_min>-20</cmd_min>
+        <initial_position>0.0</initial_position>
+      </plugin>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ==================== LINKS & JOINTS ==================== -->
+
+  <!-- Base link (body) -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="${body_length} ${body_width} ${body_height}"/>
+      </geometry>
+      <material name="orange">
+        <color rgba="0.9 0.5 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="${body_length} ${body_width} ${body_height}"/>
+      </geometry>
+    </collision>
+    <xacro:box_inertia m="${body_mass}" x="${body_length}" y="${body_width}" z="${body_height}"/>
+  </link>
+
+  <gazebo reference="base_link">
+    <material>Gazebo/Orange</material>
+  </gazebo>
+
+  <!-- Head -->
+  <link name="head_link">
+    <visual>
+      <geometry>
+        <box size="${head_length} ${head_width} ${head_height}"/>
+      </geometry>
+      <material name="dark_orange">
+        <color rgba="0.8 0.4 0.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="${head_length} ${head_width} ${head_height}"/>
+      </geometry>
+    </collision>
+    <xacro:box_inertia m="${head_mass}" x="${head_length}" y="${head_width}" z="${head_height}"/>
+  </link>
+
+  <joint name="head_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="head_link"/>
+    <origin xyz="${body_length/2 + head_length/2} 0 ${body_height/2 - head_height/2 + 0.02}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.5" upper="0.5" effort="5" velocity="2"/>
+    <dynamics damping="0.3" friction="0.1"/>
+  </joint>
+
+  <gazebo reference="head_link">
+    <material>Gazebo/DarkGrey</material>
+  </gazebo>
+
+  <!-- Head joint position controller -->
+  <gazebo>
+    <plugin filename="gz-sim-joint-position-controller-system"
+            name="gz::sim::systems::JointPositionController">
+      <joint_name>head_joint</joint_name>
+      <topic>/model/robodog/joint/head_joint/cmd_pos</topic>
+      <p_gain>10</p_gain>
+      <i_gain>0.1</i_gain>
+      <d_gain>0.5</d_gain>
+      <cmd_max>5</cmd_max>
+      <cmd_min>-5</cmd_min>
+      <initial_position>0.0</initial_position>
+    </plugin>
+  </gazebo>
+
+  <!-- Camera -->
+  <link name="camera_link">
+    <visual>
+      <geometry>
+        <box size="${camera_size} ${camera_size*2} ${camera_size}"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="${camera_size} ${camera_size*2} ${camera_size}"/>
+      </geometry>
+    </collision>
+    <xacro:box_inertia m="${camera_mass}" x="${camera_size}" y="${camera_size*2}" z="${camera_size}"/>
+  </link>
+
+  <joint name="camera_joint" type="fixed">
+    <parent link="head_link"/>
+    <child link="camera_link"/>
+    <origin xyz="${head_length/2 + camera_size/2} 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Camera optical frame (Z forward, X right, Y down) -->
+  <link name="camera_optical_frame"/>
+
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_optical_frame"/>
+    <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+  </joint>
+
+  <gazebo reference="camera_link">
+    <material>Gazebo/Black</material>
+    <sensor name="camera_sensor" type="camera">
+      <always_on>true</always_on>
+      <update_rate>30</update_rate>
+      <visualize>true</visualize>
+      <camera>
+        <horizontal_fov>1.3962634</horizontal_fov>
+        <image>
+          <width>640</width>
+          <height>480</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.02</near>
+          <far>100</far>
+        </clip>
+      </camera>
+      <topic>/camera/image_raw</topic>
+      <camera_info_topic>/camera/camera_info</camera_info_topic>
+      <gz_frame_id>camera_optical_frame</gz_frame_id>
+    </sensor>
+  </gazebo>
+
+  <!-- ==================== LEGS ==================== -->
+
+  <!-- Front Left -->
+  <xacro:leg prefix="front_left"
+             x_offset="${body_length/2 - 0.04}"
+             y_offset="${body_width/2}"/>
+
+  <!-- Front Right -->
+  <xacro:leg prefix="front_right"
+             x_offset="${body_length/2 - 0.04}"
+             y_offset="${-body_width/2}"/>
+
+  <!-- Rear Left -->
+  <xacro:leg prefix="rear_left"
+             x_offset="${-body_length/2 + 0.04}"
+             y_offset="${body_width/2}"/>
+
+  <!-- Rear Right -->
+  <xacro:leg prefix="rear_right"
+             x_offset="${-body_length/2 + 0.04}"
+             y_offset="${-body_width/2}"/>
+
+  <!-- ==================== GAZEBO PLUGINS ==================== -->
+
+  <!-- Publish joint states from simulation -->
+  <gazebo>
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>joint_states</topic>
+    </plugin>
+  </gazebo>
+
+  <!-- Ground truth odometry for follower controller -->
+  <gazebo>
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <odom_frame>odom</odom_frame>
+      <robot_base_frame>base_link</robot_base_frame>
+      <odom_publish_frequency>50</odom_publish_frequency>
+      <odom_topic>odometry_with_covariance</odom_topic>
+      <dimensions>3</dimensions>
+    </plugin>
+  </gazebo>
+
+</robot>
