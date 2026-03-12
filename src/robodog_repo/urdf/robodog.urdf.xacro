@@ -1,35 +1,104 @@
 <?xml version="1.0"?>
+<!--
+  ============================================================================
+  robodog.urdf.xacro  —  Robot Description for the Robodog Quadruped
+  ============================================================================
+  PURPOSE:
+    This file defines the complete physical and visual model of the robodog
+    used in the follow-the-leader simulation.  It is written in Xacro
+    (XML Macro) format, which extends plain URDF with named macros and
+    mathematical expressions to avoid repetitive code.
+
+    When loaded by ROS 2, xacro.process_file() expands all macros and
+    ${...} expressions into a standard URDF XML that Gazebo and
+    robot_state_publisher can consume.
+
+  ROBOT STRUCTURE:
+    base_link  (rectangular body — orange)
+    ├── head_link     (revolute joint around Z — the dog can look left/right)
+    │   └── camera_link  (fixed — the camera is rigidly mounted to the head)
+    │       └── camera_optical_frame  (fixed — coordinate frame for vision)
+    ├── front_left_upper_leg   (hip joint, revolute around Y)
+    │   └── front_left_lower_leg  (knee joint, revolute around Y)
+    │       └── front_left_foot   (fixed sphere — ground contact point)
+    ├── front_right_upper_leg  (same leg structure, mirrored)
+    ├── rear_left_upper_leg
+    └── rear_right_upper_leg
+
+  XACRO MACROS DEFINED:
+    box_inertia(m, x, y, z)    — Moment of inertia tensor for a solid box
+    cylinder_inertia(m, r, l)  — Moment of inertia tensor for a solid cylinder
+    sphere_inertia(m, r)       — Moment of inertia tensor for a solid sphere
+    leg(prefix, x_offset, y_offset)
+        — Creates one complete leg: upper link + hip joint + lower link +
+          knee joint + foot + Gazebo colours + two PID joint controllers.
+          Called 4 times (front_left, front_right, rear_left, rear_right).
+
+  GAZEBO PLUGINS (embedded in <gazebo> tags):
+    JointPositionController  — PID servo for each hip, knee, and head joint.
+        Listens on: /model/robodog/joint/<joint_name>/cmd_pos (Float64)
+        walk_cmd_vel.py writes to these topics at 50 Hz.
+
+    JointStatePublisher      — Broadcasts current joint angles on /joint_states
+        robot_state_publisher reads these to update TF transforms.
+
+    OdometryPublisher        — Ground-truth position/velocity of the robot body.
+        Publishes on: /model/robodog/odometry_with_covariance
+        The ros_gz_bridge remaps this to /leader/odom or /follower/odom so
+        follower_controller.py can consume it.
+
+    Camera sensor            — 640×480 RGB camera at 30 fps.
+        Publishes: /camera/image_raw and /camera/camera_info via the bridge.
+  ============================================================================
+-->
+
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="robodog">
 
-  <!-- ==================== PROPERTIES ==================== -->
-  <xacro:property name="body_length" value="0.4"/>
-  <xacro:property name="body_width" value="0.2"/>
-  <xacro:property name="body_height" value="0.1"/>
-  <xacro:property name="body_mass" value="3.0"/>
+  <!-- ==================== PROPERTIES ====================
+       xacro:property defines named constants used throughout this file.
+       Using properties instead of hard-coded numbers means changing a size
+       here automatically updates every joint origin, inertia, and geometry
+       that references it.  Units: metres, kilograms, radians. -->
 
+  <!-- Body (main torso) dimensions -->
+  <xacro:property name="body_length" value="0.4"/>   <!-- fore-aft length (X) -->
+  <xacro:property name="body_width"  value="0.2"/>   <!-- lateral width (Y) -->
+  <xacro:property name="body_height" value="0.1"/>   <!-- vertical height (Z) -->
+  <xacro:property name="body_mass"   value="3.0"/>   <!-- kg -->
+
+  <!-- Head block dimensions -->
   <xacro:property name="head_length" value="0.1"/>
-  <xacro:property name="head_width" value="0.12"/>
+  <xacro:property name="head_width"  value="0.12"/>
   <xacro:property name="head_height" value="0.08"/>
-  <xacro:property name="head_mass" value="0.3"/>
+  <xacro:property name="head_mass"   value="0.3"/>
 
-  <xacro:property name="camera_size" value="0.02"/>
+  <!-- Camera cube dimensions -->
+  <xacro:property name="camera_size" value="0.02"/>   <!-- side length (m) -->
   <xacro:property name="camera_mass" value="0.01"/>
 
-  <xacro:property name="upper_leg_radius" value="0.02"/>
-  <xacro:property name="upper_leg_length" value="0.15"/>
-  <xacro:property name="upper_leg_mass" value="0.2"/>
+  <!-- Upper leg (thigh) dimensions — cylindrical link -->
+  <xacro:property name="upper_leg_radius" value="0.02"/>   <!-- m -->
+  <xacro:property name="upper_leg_length" value="0.15"/>   <!-- m -->
+  <xacro:property name="upper_leg_mass"   value="0.2"/>    <!-- kg -->
 
+  <!-- Lower leg (shin) dimensions — thinner cylinder -->
   <xacro:property name="lower_leg_radius" value="0.015"/>
   <xacro:property name="lower_leg_length" value="0.15"/>
-  <xacro:property name="lower_leg_mass" value="0.1"/>
+  <xacro:property name="lower_leg_mass"   value="0.1"/>
 
-  <!-- Foot (small sphere at end of each lower leg for ground contact) -->
+  <!-- Foot — small sphere at the tip of each lower leg for stable ground contact -->
   <xacro:property name="foot_radius" value="0.02"/>
-  <xacro:property name="foot_mass" value="0.05"/>
+  <xacro:property name="foot_mass"   value="0.05"/>
 
-  <!-- ==================== MACROS ==================== -->
+  <!-- ==================== INERTIA MACROS ====================
+       Accurate inertia tensors are REQUIRED for Gazebo's physics to behave
+       realistically.  Without them the robot tumbles or oscillates.
 
-  <!-- Inertia for a box -->
+       Each macro computes the standard analytical inertia for the shape.
+       Params: m=mass, x/y/z=dimensions (box), r=radius, l=length (cylinder/sphere).
+  -->
+
+  <!-- Box inertia: Ixx = m(y²+z²)/12, Iyy = m(x²+z²)/12, Izz = m(x²+y²)/12 -->
   <xacro:macro name="box_inertia" params="m x y z">
     <inertial>
       <mass value="${m}"/>
@@ -39,7 +108,9 @@
     </inertial>
   </xacro:macro>
 
-  <!-- Inertia for a cylinder -->
+  <!-- Cylinder inertia (solid, uniform density):
+       Ixx = Iyy = m(3r²+l²)/12   (lateral bending)
+       Izz = mr²/2                 (spinning around long axis) -->
   <xacro:macro name="cylinder_inertia" params="m r l">
     <inertial>
       <mass value="${m}"/>
@@ -49,7 +120,8 @@
     </inertial>
   </xacro:macro>
 
-  <!-- Inertia for a sphere -->
+  <!-- Sphere inertia (solid, uniform density):
+       Ixx = Iyy = Izz = 2mr²/5   (same in all axes by symmetry) -->
   <xacro:macro name="sphere_inertia" params="m r">
     <inertial>
       <mass value="${m}"/>
@@ -59,41 +131,72 @@
     </inertial>
   </xacro:macro>
 
-  <!-- Leg macro: upper + lower leg + foot, with hip & knee joints + position controllers -->
+  <!-- ==================== LEG MACRO ====================
+       Defines one complete leg assembly.  Called 4 times below with
+       different prefixes and offsets to create all four legs.
+
+       Parameters:
+         prefix    — name prefix, e.g. 'front_left' → front_left_hip_joint
+         x_offset  — fore-aft attachment position on the body (m, from body centre)
+         y_offset  — lateral attachment position on the body (m, from body centre)
+
+       What this macro creates (for one leg):
+         Links:  <prefix>_upper_leg, <prefix>_lower_leg, <prefix>_foot
+         Joints: <prefix>_hip_joint  (revolute, Y axis, between body and upper leg)
+                 <prefix>_knee_joint (revolute, Y axis, between upper and lower leg)
+                 <prefix>_foot_joint (fixed,    at bottom of lower leg)
+         Plugins: one JointPositionController per hip and knee joint
+  -->
   <xacro:macro name="leg" params="prefix x_offset y_offset">
-    <!-- Upper leg -->
+
+    <!-- ── Upper leg (thigh) link ──────────────────────────────────────── -->
     <link name="${prefix}_upper_leg">
       <visual>
         <geometry>
+          <!-- Cylinder rendered along Z axis, shifted down so top is at the hip -->
           <cylinder radius="${upper_leg_radius}" length="${upper_leg_length}"/>
         </geometry>
+        <!-- Origin offset: cylinder centre is at -length/2 in Z, so the joint
+             origin (top of the cylinder) aligns with the hip joint. -->
         <origin xyz="0 0 ${-upper_leg_length/2}" rpy="0 0 0"/>
         <material name="dark_grey">
           <color rgba="0.3 0.3 0.3 1.0"/>
         </material>
       </visual>
+      <!-- Collision geometry mirrors visual for accurate contact detection -->
       <collision>
         <geometry>
           <cylinder radius="${upper_leg_radius}" length="${upper_leg_length}"/>
         </geometry>
         <origin xyz="0 0 ${-upper_leg_length/2}" rpy="0 0 0"/>
       </collision>
+      <!-- Inertia computed from upper leg mass and cylinder dimensions -->
       <xacro:cylinder_inertia m="${upper_leg_mass}" r="${upper_leg_radius}" l="${upper_leg_length}"/>
     </link>
 
+    <!-- ── Hip joint ───────────────────────────────────────────────────── -->
+    <!-- Connects body (base_link) to the upper leg.
+         Revolute around Y axis → swings the leg forward and backward.
+         Origin is placed at the corner of the body box at the leg attachment point. -->
     <joint name="${prefix}_hip_joint" type="revolute">
       <parent link="base_link"/>
-      <child link="${prefix}_upper_leg"/>
+      <child  link="${prefix}_upper_leg"/>
+      <!-- x_offset, y_offset position the hip at the correct corner of the body.
+           z = -body_height/2 places it at the bottom edge of the body. -->
       <origin xyz="${x_offset} ${y_offset} ${-body_height/2}" rpy="0 0 0"/>
-      <axis xyz="0 1 0"/>
+      <axis xyz="0 1 0"/>   <!-- Rotation around Y → fore/aft swing -->
+      <!-- Joint travel: ±0.8 rad (~46°) fore and aft.
+           Effort limit 100 Nm, velocity limit 10 rad/s. -->
       <limit lower="-0.8" upper="0.8" effort="100.0" velocity="10.0"/>
+      <!-- Joint dynamics for realistic simulation response -->
       <dynamics damping="0.5" friction="0.2"/>
     </joint>
 
-    <!-- Lower leg -->
+    <!-- ── Lower leg (shin) link ──────────────────────────────────────── -->
     <link name="${prefix}_lower_leg">
       <visual>
         <geometry>
+          <!-- Thinner cylinder than the upper leg for realistic proportions -->
           <cylinder radius="${lower_leg_radius}" length="${lower_leg_length}"/>
         </geometry>
         <origin xyz="0 0 ${-lower_leg_length/2}" rpy="0 0 0"/>
@@ -110,23 +213,32 @@
       <xacro:cylinder_inertia m="${lower_leg_mass}" r="${lower_leg_radius}" l="${lower_leg_length}"/>
     </link>
 
+    <!-- ── Knee joint ─────────────────────────────────────────────────── -->
+    <!-- Connects upper leg to lower leg.  Also revolves around Y axis.
+         Origin is at the BOTTOM of the upper leg (i.e. origin z = -upper_leg_length
+         relative to the upper leg's own frame). -->
     <joint name="${prefix}_knee_joint" type="revolute">
       <parent link="${prefix}_upper_leg"/>
-      <child link="${prefix}_lower_leg"/>
+      <child  link="${prefix}_lower_leg"/>
       <origin xyz="0 0 ${-upper_leg_length}" rpy="0 0 0"/>
       <axis xyz="0 1 0"/>
+      <!-- Knee only bends downward/backward (lower=-1.5 rad), never extends past 0.
+           This mimics real quadruped knee anatomy. -->
       <limit lower="-1.5" upper="0.0" effort="100.0" velocity="10.0"/>
       <dynamics damping="0.5" friction="0.2"/>
     </joint>
 
-    <!-- Foot (sphere at the bottom of lower leg for stable ground contact) -->
+    <!-- ── Foot link ──────────────────────────────────────────────────── -->
+    <!-- Small sphere at the very tip of the lower leg.  The sphere shape
+         gives a single stable contact point on the ground plane and enables
+         realistic friction via the Gazebo surface parameters below. -->
     <link name="${prefix}_foot">
       <visual>
         <geometry>
           <sphere radius="${foot_radius}"/>
         </geometry>
         <material name="rubber_black">
-          <color rgba="0.15 0.15 0.15 1.0"/>
+          <color rgba="0.15 0.15 0.15 1.0"/>   <!-- Dark rubber colour -->
         </material>
       </visual>
       <collision>
@@ -137,50 +249,69 @@
       <xacro:sphere_inertia m="${foot_mass}" r="${foot_radius}"/>
     </link>
 
+    <!-- Foot joint: FIXED — the foot doesn't rotate relative to the lower leg -->
     <joint name="${prefix}_foot_joint" type="fixed">
       <parent link="${prefix}_lower_leg"/>
-      <child link="${prefix}_foot"/>
+      <child  link="${prefix}_foot"/>
+      <!-- Place the foot sphere at the very bottom of the lower leg cylinder -->
       <origin xyz="0 0 ${-lower_leg_length}" rpy="0 0 0"/>
     </joint>
 
-    <!-- Gazebo colors -->
+    <!-- ── Gazebo material colours ─────────────────────────────────────── -->
+    <!-- These <gazebo reference="..."> tags set the visual appearance inside
+         Gazebo.  URDF <material> tags are for RViz; Gazebo ignores them. -->
     <gazebo reference="${prefix}_upper_leg">
       <material>Gazebo/DarkGrey</material>
     </gazebo>
     <gazebo reference="${prefix}_lower_leg">
       <material>Gazebo/Grey</material>
     </gazebo>
-    <!-- Foot: high friction for stable ground contact -->
+
+    <!-- Foot: black rubber with HIGH friction coefficients for traction.
+         mu1/mu2 are ODE friction coefficients (1.5 = roughly rubber-on-concrete).
+         kp/kd control contact stiffness and damping to prevent foot clipping. -->
     <gazebo reference="${prefix}_foot">
       <material>Gazebo/Black</material>
-      <!-- Legacy tags -->
+      <!-- Legacy Gazebo Classic tags (kept for backward compatibility) -->
       <mu1>1.5</mu1>
       <mu2>1.5</mu2>
-      <kp>1000000.0</kp>
-      <kd>100.0</kd>
+      <kp>1000000.0</kp>     <!-- Contact spring stiffness (N/m) -->
+      <kd>100.0</kd>          <!-- Contact damping coefficient -->
       <minDepth>0.005</minDepth>
-      
-      <!-- Gazebo Harmonic specific collision params -->
+
+      <!-- Gazebo Harmonic (Ignition) specific collision surface parameters -->
       <collision>
         <surface>
           <friction>
             <ode>
-              <mu>1.5</mu>
-              <mu2>1.5</mu2>
+              <mu>1.5</mu>    <!-- Primary friction (along motion direction) -->
+              <mu2>1.5</mu2>  <!-- Secondary friction (lateral direction) -->
             </ode>
           </friction>
           <contact>
             <ode>
-              <kp>1000000.0</kp>
-              <kd>100.0</kd>
-              <min_depth>0.005</min_depth>
+              <kp>1000000.0</kp>     <!-- Stiffness: prevents foot from sinking too deep -->
+              <kd>100.0</kd>          <!-- Damping: prevents bouncing on contact -->
+              <min_depth>0.005</min_depth>  <!-- Minimum penetration allowed (m) -->
             </ode>
           </contact>
         </surface>
       </collision>
     </gazebo>
 
-    <!-- Joint position controllers — hold joints at commanded angle (default 0) -->
+    <!-- ── Joint Position Controllers (one per actuated joint) ──────────
+         Each JointPositionController Gazebo plugin runs a PID loop that
+         drives the joint to the commanded angle received on its topic.
+
+         walk_cmd_vel.py publishes to:
+           /model/robodog/joint/<name>/cmd_pos  (Float64, angle in radians)
+
+         PID gains tuned for responsive but stable joint tracking:
+           p_gain=30  — proportional: main driving force
+           i_gain=0.5 — integral: eliminates steady-state error
+           d_gain=1.0 — derivative: damps oscillation
+           cmd_max/min=±20 N·m — effort saturation limits
+    -->
     <gazebo>
       <plugin filename="gz-sim-joint-position-controller-system"
               name="gz::sim::systems::JointPositionController">
@@ -191,7 +322,7 @@
         <d_gain>1.0</d_gain>
         <cmd_max>20</cmd_max>
         <cmd_min>-20</cmd_min>
-        <initial_position>0.0</initial_position>
+        <initial_position>0.0</initial_position>   <!-- Spawn with leg straight -->
       </plugin>
     </gazebo>
     <gazebo>
@@ -209,16 +340,22 @@
     </gazebo>
   </xacro:macro>
 
-  <!-- ==================== LINKS & JOINTS ==================== -->
+  <!-- ==================== LINKS & JOINTS ====================
+       Now we define the actual robot structure using the macros above.
+  -->
 
-  <!-- Base link (body) -->
+  <!-- ── BASE LINK (main body / torso) ──────────────────────────────────
+       This is the root link of the robot.  Everything else is a child of
+       base_link.  In Gazebo, the OdometryPublisher tracks base_link's
+       pose to give us ground-truth odometry for the follower controller. -->
   <link name="base_link">
     <visual>
       <geometry>
+        <!-- Rectangular box: length × width × height -->
         <box size="${body_length} ${body_width} ${body_height}"/>
       </geometry>
       <material name="orange">
-        <color rgba="0.9 0.5 0.1 1.0"/>
+        <color rgba="0.9 0.5 0.1 1.0"/>   <!-- Orange body for easy visibility -->
       </material>
     </visual>
     <collision>
@@ -229,11 +366,14 @@
     <xacro:box_inertia m="${body_mass}" x="${body_length}" y="${body_width}" z="${body_height}"/>
   </link>
 
+  <!-- Override body colour in Gazebo (URDF materials are RViz-only) -->
   <gazebo reference="base_link">
     <material>Gazebo/Orange</material>
   </gazebo>
 
-  <!-- Head -->
+  <!-- ── HEAD LINK ──────────────────────────────────────────────────────
+       The head houses the camera and can pan left/right (revolute around Z).
+       It is attached to the FRONT of the body, slightly above the body midplane. -->
   <link name="head_link">
     <visual>
       <geometry>
@@ -251,11 +391,16 @@
     <xacro:box_inertia m="${head_mass}" x="${head_length}" y="${head_width}" z="${head_height}"/>
   </link>
 
+  <!-- Head joint: revolute around Z → left/right pan
+       Origin: positioned at the front face of base_link, vertically centred.
+       Limit: ±0.5 rad (~29°) to prevent the head from clipping the body. -->
   <joint name="head_joint" type="revolute">
     <parent link="base_link"/>
-    <child link="head_link"/>
+    <child  link="head_link"/>
+    <!-- Place joint at the front edge of the body + half the head length forward,
+         raised slightly so the head sits on top of the body rim. -->
     <origin xyz="${body_length/2 + head_length/2} 0 ${body_height/2 - head_height/2 + 0.02}" rpy="0 0 0"/>
-    <axis xyz="0 0 1"/>
+    <axis xyz="0 0 1"/>   <!-- Rotation around Z axis = yaw = pan left/right -->
     <limit lower="-0.5" upper="0.5" effort="5" velocity="2"/>
     <dynamics damping="0.3" friction="0.1"/>
   </joint>
@@ -264,7 +409,8 @@
     <material>Gazebo/DarkGrey</material>
   </gazebo>
 
-  <!-- Head joint position controller -->
+  <!-- Head joint PID controller — same system as leg joints but lower gains
+       because the head is lighter and needs gentler control. -->
   <gazebo>
     <plugin filename="gz-sim-joint-position-controller-system"
             name="gz::sim::systems::JointPositionController">
@@ -275,14 +421,17 @@
       <d_gain>0.5</d_gain>
       <cmd_max>5</cmd_max>
       <cmd_min>-5</cmd_min>
-      <initial_position>0.0</initial_position>
+      <initial_position>0.0</initial_position>   <!-- Head starts facing forward -->
     </plugin>
   </gazebo>
 
-  <!-- Camera -->
+  <!-- ── CAMERA LINK ────────────────────────────────────────────────────
+       A small 2×4×2 cm box rigidly attached to the front of the head.
+       Contains the Gazebo camera sensor plugin (see <sensor> block below). -->
   <link name="camera_link">
     <visual>
       <geometry>
+        <!-- Slightly wider than tall to look like a camera module -->
         <box size="${camera_size} ${camera_size*2} ${camera_size}"/>
       </geometry>
       <material name="black">
@@ -297,84 +446,123 @@
     <xacro:box_inertia m="${camera_mass}" x="${camera_size}" y="${camera_size*2}" z="${camera_size}"/>
   </link>
 
+  <!-- Camera joint: FIXED — camera doesn't move independently of the head -->
   <joint name="camera_joint" type="fixed">
     <parent link="head_link"/>
-    <child link="camera_link"/>
+    <child  link="camera_link"/>
+    <!-- Placed at the very front face of the head block -->
     <origin xyz="${head_length/2 + camera_size/2} 0 0" rpy="0 0 0"/>
   </joint>
 
-  <!-- Camera optical frame (Z forward, X right, Y down) -->
+  <!-- ── Camera optical frame ───────────────────────────────────────────
+       ROS vision conventions require a separate TF frame where:
+         Z points FORWARD (out of the lens)
+         X points RIGHT
+         Y points DOWN
+       This differs from the URDF body convention (X=forward, Z=up).
+       The fixed joint with rpy=(-π/2, 0, -π/2) rotates from URDF to optical frame.
+       Vision nodes and the camera driver publish images in this frame. -->
   <link name="camera_optical_frame"/>
 
   <joint name="camera_optical_joint" type="fixed">
     <parent link="camera_link"/>
-    <child link="camera_optical_frame"/>
+    <child  link="camera_optical_frame"/>
     <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+    <!-- rpy: roll=-90° then yaw=-90° converts from body axes to optical axes -->
   </joint>
 
+  <!-- Camera Gazebo sensor plugin — published through the ros_gz_bridge -->
   <gazebo reference="camera_link">
     <material>Gazebo/Black</material>
     <sensor name="camera_sensor" type="camera">
-      <always_on>true</always_on>
-      <update_rate>30</update_rate>
-      <visualize>true</visualize>
+      <always_on>true</always_on>     <!-- Keep publishing even when not viewed in GUI -->
+      <update_rate>30</update_rate>   <!-- 30 fps — standard camera rate -->
+      <visualize>true</visualize>     <!-- Show the camera frustum in Gazebo GUI -->
       <camera>
+        <!-- Horizontal field of view: 1.3962634 rad ≈ 80° — wide-angle view -->
         <horizontal_fov>1.3962634</horizontal_fov>
         <image>
-          <width>640</width>
-          <height>480</height>
-          <format>R8G8B8</format>
+          <width>640</width>    <!-- Pixels -->
+          <height>480</height>  <!-- Pixels -->
+          <format>R8G8B8</format>  <!-- 24-bit RGB, no alpha -->
         </image>
         <clip>
-          <near>0.02</near>
-          <far>100</far>
+          <near>0.02</near>   <!-- Minimum render distance (m) — avoids z-fighting -->
+          <far>100</far>      <!-- Maximum render distance (m) -->
         </clip>
       </camera>
+      <!-- Topic names used by the ros_gz_bridge to expose images to ROS -->
       <topic>/camera/image_raw</topic>
       <camera_info_topic>/camera/camera_info</camera_info_topic>
+      <!-- Publish image/CameraInfo in the optical frame so vision nodes get
+           correct coordinate conventions out of the box. -->
       <gz_frame_id>camera_optical_frame</gz_frame_id>
     </sensor>
   </gazebo>
 
-  <!-- ==================== LEGS ==================== -->
+  <!-- ==================== LEGS ====================
+       Instantiate the leg macro 4 times, one per corner of the body.
+
+       x_offset: positive = toward front of body, negative = toward rear.
+                 Using (body_length/2 - 0.04) instead of body_length/2
+                 sets the legs in slightly from the body corners for stability.
+       y_offset: positive = left side, negative = right side.
+  -->
 
   <!-- Front Left -->
   <xacro:leg prefix="front_left"
-             x_offset="${body_length/2 - 0.04}"
+             x_offset="${body_length/2 - 0.04}"    <!-- Near front, left side  -->
              y_offset="${body_width/2}"/>
 
   <!-- Front Right -->
   <xacro:leg prefix="front_right"
-             x_offset="${body_length/2 - 0.04}"
+             x_offset="${body_length/2 - 0.04}"    <!-- Near front, right side -->
              y_offset="${-body_width/2}"/>
 
   <!-- Rear Left -->
   <xacro:leg prefix="rear_left"
-             x_offset="${-body_length/2 + 0.04}"
+             x_offset="${-body_length/2 + 0.04}"   <!-- Near rear, left side   -->
              y_offset="${body_width/2}"/>
 
   <!-- Rear Right -->
   <xacro:leg prefix="rear_right"
-             x_offset="${-body_length/2 + 0.04}"
+             x_offset="${-body_length/2 + 0.04}"   <!-- Near rear, right side  -->
              y_offset="${-body_width/2}"/>
 
-  <!-- ==================== GAZEBO PLUGINS ==================== -->
+  <!-- ==================== GLOBAL GAZEBO PLUGINS ====================
+       These plugins attach to the whole robot (not a specific link),
+       so they go inside a <gazebo> tag with NO reference attribute.
+  -->
 
-  <!-- Publish joint states from simulation -->
+  <!-- JointStatePublisher: reads all joint angles from the simulation and
+       publishes them on the /joint_states topic (sensor_msgs/JointState).
+       robot_state_publisher subscribes to /joint_states to update TF frames
+       so RViz and other tools see the robot in its current pose. -->
   <gazebo>
     <plugin filename="gz-sim-joint-state-publisher-system"
             name="gz::sim::systems::JointStatePublisher">
-      <topic>joint_states</topic>
+      <topic>joint_states</topic>   <!-- Relative topic; bridge remaps to /joint_states -->
     </plugin>
   </gazebo>
 
-  <!-- Ground truth odometry for follower controller -->
+  <!-- OdometryPublisher: computes and publishes the robot's ground-truth
+       position and velocity in the world frame.  This is the data source for
+       the follower_controller.py — it tells the controller exactly WHERE each
+       robot is without sensor noise (ideal for simulation).
+
+       Configuration:
+         odom_frame        — the global reference frame name
+         robot_base_frame  — the link whose pose to track
+         odom_publish_frequency — 50 Hz, matching the controller's 20 Hz need
+         odom_topic        — relative topic name (bridge remaps to /leader/odom etc.)
+         dimensions        — 3 = planar + heading (2D position + 1D yaw)
+  -->
   <gazebo>
     <plugin filename="gz-sim-odometry-publisher-system"
             name="gz::sim::systems::OdometryPublisher">
       <odom_frame>odom</odom_frame>
       <robot_base_frame>base_link</robot_base_frame>
-      <odom_publish_frequency>50</odom_publish_frequency>
+      <odom_publish_frequency>50</odom_publish_frequency>   <!-- Hz -->
       <odom_topic>odometry_with_covariance</odom_topic>
       <dimensions>3</dimensions>
     </plugin>
