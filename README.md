@@ -10,7 +10,7 @@ This project implements a leader-follower platoon system using two simulated Rob
 - **Safe Distance Halting**: The follower robot will come to a smooth stop when it reaches 1.0m behind the leader.
 
 ## Dependencies
-- ROS 2 (Humble or newer)
+- ROS 2 Jazzy
 - Gazebo Harmonic
 - `ros_gz` (ROS 2 / Gazebo bridge)
 - `teleop_twist_keyboard`
