@@ -82,20 +82,19 @@ class WalkCmdVelNode(Node):
         # These are tunable settings that can be changed from the launch file.
         # declare_parameter = "I have this setting; use this default if no value given."
 
-        self.declare_parameter('base_gait_frequency', 1.5)
+        self.declare_parameter('base_gait_frequency', 2.0)
         # base_gait_frequency = how many complete steps per second.
-        # 1.5 Hz = 1.5 full walk cycles per second.
-        # Higher = faster stepping cadence (but may look unnatural if too high).
+        # Increased to 2.0 Hz so shorter strides still produce good forward speed.
 
-        self.declare_parameter('base_hip_amplitude', 0.5)
+        self.declare_parameter('base_hip_amplitude', 0.25)
         # base_hip_amplitude = how far the hips swing in each direction (radians).
-        # 0.5 rad ≈ 28 degrees of swing.
-        # Bigger = longer strides. Smaller = tiny shuffling steps.
+        # REDUCED from 0.5 to 0.25 rad (~14°) — smaller strides cause less body sway
+        # which prevents the robot from tipping sideways during walking.
 
-        self.declare_parameter('knee_amplitude', 0.8)
+        self.declare_parameter('knee_amplitude', 0.4)
         # knee_amplitude = how much the knee bends to LIFT the foot during each step.
-        # 0.8 rad ≈ 46 degrees of bend.
-        # More bend = foot lifts higher (good for uneven terrain but uses more energy).
+        # REDUCED from 0.8 to 0.4 rad — less lift = foot stays closer to ground longer,
+        # increasing ground contact time and stability.
 
         self.declare_parameter('knee_offset', -0.3)
         # knee_offset = the resting angle of the knee when standing still.
@@ -309,25 +308,25 @@ class WalkCmdVelNode(Node):
 
 
         # STEP 4: Compute turning adjustments
-        turn_factor = self.angular_z * 0.8
-        # turn_factor is how much to ADD to one side and SUBTRACT from the other.
-        # This is like skid-steering (tank turning):
-        #   Left side gets MORE swing → moves farther per step → robot curves right.
-        #   Right side gets LESS swing → robot curves right.
-        # Multiplying by 0.8 prevents over-correction (trial-tuned value).
+        turn_factor = self.angular_z * 0.3
+        # REDUCED from 0.8 to 0.3: smaller turn bias per unit of angular velocity.
+        # At 0.8, even moderate angular_z caused hip amplitude to exceed the ±0.8 rad
+        # joint limit, slamming the joint hard stop and toppling the robot.
 
         fwd_speed = -self.base_hip_amp * direction if abs(self.linear_x) > 0.05 else 0.0
-        # fwd_speed = the baseline hip swing amplitude for forward/backward motion.
-        # Negative sign because of how the joint coordinate frame is oriented in the URDF
-        # (positive hip angle = leg swings one way; we flip sign to go forward correctly).
-        # If linear_x is tiny (< 0.05), treat it as zero — pure rotation in place.
+        # Baseline hip swing: negative flips direction due to URDF frame orientation.
+        # Zero when linear_x is tiny — handles pure in-place rotation.
 
         hip_amp_left  = fwd_speed + turn_factor
-        # Left-side hips get MORE swing when turning left (angular_z > 0 → turn_factor > 0).
-
         hip_amp_right = fwd_speed - turn_factor
-        # Right-side hips get LESS swing when turning left.
-        # This difference between left and right is what makes the robot curve.
+
+        # !! SAFETY CLAMP — prevents joint hard-stop collisions !!
+        # Hip joint limit in URDF is ±0.8 rad.  If hip_amp exceeds that, the joint
+        # slams against the mechanical stop, jerks the body, and the robot falls.
+        # We clamp to ±base_hip_amp (0.25) as a hard ceiling.
+        max_amp = self.base_hip_amp
+        hip_amp_left  = max(-max_amp, min(hip_amp_left,  max_amp))
+        hip_amp_right = max(-max_amp, min(hip_amp_right, max_amp))
 
 
         # STEP 5: Compute hip and knee angles for BOTH gait phases

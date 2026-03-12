@@ -361,8 +361,13 @@ class FollowerController(Node):
             # Positive angle_err → positive ang_z → turns left (correct!)
             # Negative angle_err → negative ang_z → turns right (correct!)
 
-            cmd.angular.z = max(-2.0, min(ang_z, 2.0))
-            # Clamp angular speed to ±2.0 rad/s to prevent wild spinning.
+            cmd.angular.z = max(-0.5, min(ang_z, 0.5))
+            # !! CRITICAL CLAMP — must be small or the follower falls !!
+            # walk_cmd_vel computes:  turn_factor = angular_z × 0.8
+            # Then:  hip_amplitude = fwd_speed ± turn_factor
+            # At angular_z=2.0: turn_factor=1.6, hip reaches 1.85 rad → beyond ±0.8 limit
+            # → joint slams hard stop every sharp turn → robot falls.
+            # At angular_z=0.5: turn_factor=0.4, hip reaches 0.65 rad → safely within limit.
 
             # self.get_logger().info(f'Moving - Dist: {dist_to_leader:.2f}, vel: {cmd.linear.x:.2f}')
 

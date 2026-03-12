@@ -17,13 +17,11 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-# ---------------------------------------------------------
-# UPDATE: Added 'models' to the directory list below
-# This ensures the robot model files are copied to the
-# install folder so Gazebo can find them.
-# ---------------------------------------------------------
+# Install only the directories that actually exist in this package.
+# 'platoon_description' only contains launch files — urdf and models
+# belong to the 'br2_robodog' package, not here.
 install(
-  DIRECTORY launch urdf models
+  DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}
 )
 

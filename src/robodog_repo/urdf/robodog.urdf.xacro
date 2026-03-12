@@ -54,6 +54,18 @@
 
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="robodog">
 
+  <!--
+    gz_model_name: the Gazebo model name this robot is spawned with.
+    Must match the '-name' argument passed to 'ros_gz_sim create'.
+    Default 'robodog' works for gazebo.launch.py (single robot).
+    platoon_robodogs.launch.py passes 'leader' or 'follower' via xacro mappings.
+    Changing this ensures the JointPositionController topics match the
+    topics that walk_cmd_vel.py publishes to.
+  -->
+  <xacro:arg name="gz_model_name" default="robodog"/>
+  <xacro:property name="gz_model" value="$(arg gz_model_name)"/>
+  <!-- gz_model is now available as ${gz_model} anywhere in this file -->
+
   <!-- ==================== PROPERTIES ====================
        xacro:property defines named constants used throughout this file.
        Using properties instead of hard-coded numbers means changing a size
@@ -62,9 +74,9 @@
 
   <!-- Body (main torso) dimensions -->
   <xacro:property name="body_length" value="0.4"/>   <!-- fore-aft length (X) -->
-  <xacro:property name="body_width"  value="0.2"/>   <!-- lateral width (Y) -->
+  <xacro:property name="body_width"  value="0.28"/>  <!-- lateral width (Y): wider = more stable stance -->
   <xacro:property name="body_height" value="0.1"/>   <!-- vertical height (Z) -->
-  <xacro:property name="body_mass"   value="3.0"/>   <!-- kg -->
+  <xacro:property name="body_mass"   value="5.0"/>   <!-- kg: heavier body lowers CoG, resists tipping -->
 
   <!-- Head block dimensions -->
   <xacro:property name="head_length" value="0.1"/>
@@ -188,8 +200,8 @@
       <!-- Joint travel: ±0.8 rad (~46°) fore and aft.
            Effort limit 100 Nm, velocity limit 10 rad/s. -->
       <limit lower="-0.8" upper="0.8" effort="100.0" velocity="10.0"/>
-      <!-- Joint dynamics for realistic simulation response -->
-      <dynamics damping="0.5" friction="0.2"/>
+      <!-- High damping resists rapid/uncontrolled leg movement (e.g. buckling at spawn) -->
+      <dynamics damping="5.0" friction="0.2"/>
     </joint>
 
     <!-- ── Lower leg (shin) link ──────────────────────────────────────── -->
@@ -225,7 +237,8 @@
       <!-- Knee only bends downward/backward (lower=-1.5 rad), never extends past 0.
            This mimics real quadruped knee anatomy. -->
       <limit lower="-1.5" upper="0.0" effort="100.0" velocity="10.0"/>
-      <dynamics damping="0.5" friction="0.2"/>
+      <!-- High damping prevents knee from snapping/bouncing at spawn or step impact -->
+      <dynamics damping="5.0" friction="0.2"/>
     </joint>
 
     <!-- ── Foot link ──────────────────────────────────────────────────── -->
@@ -316,26 +329,30 @@
       <plugin filename="gz-sim-joint-position-controller-system"
               name="gz::sim::systems::JointPositionController">
         <joint_name>${prefix}_hip_joint</joint_name>
-        <topic>/model/robodog/joint/${prefix}_hip_joint/cmd_pos</topic>
-        <p_gain>30</p_gain>
-        <i_gain>0.5</i_gain>
-        <d_gain>1.0</d_gain>
-        <cmd_max>20</cmd_max>
-        <cmd_min>-20</cmd_min>
-        <initial_position>0.0</initial_position>   <!-- Spawn with leg straight -->
+        <topic>/model/${gz_model}/joint/${prefix}_hip_joint/cmd_pos</topic>
+        <!-- Stiff PID: needs to resist gravity and inertia during walking -->
+        <p_gain>200</p_gain>   <!-- Proportional: high = very stiff joint -->
+        <i_gain>0.5</i_gain>   <!-- Integral: eliminates steady-state position error -->
+        <d_gain>10.0</d_gain>  <!-- Derivative: damps oscillation / prevents bouncing -->
+        <cmd_max>50</cmd_max>  <!-- Max torque (N·m) — enough to hold the body weight -->
+        <cmd_min>-50</cmd_min>
+        <initial_position>0.0</initial_position>  <!-- Hip starts centred (legs point straight down) -->
       </plugin>
     </gazebo>
     <gazebo>
       <plugin filename="gz-sim-joint-position-controller-system"
               name="gz::sim::systems::JointPositionController">
         <joint_name>${prefix}_knee_joint</joint_name>
-        <topic>/model/robodog/joint/${prefix}_knee_joint/cmd_pos</topic>
-        <p_gain>30</p_gain>
+        <topic>/model/${gz_model}/joint/${prefix}_knee_joint/cmd_pos</topic>
+        <p_gain>200</p_gain>
         <i_gain>0.5</i_gain>
-        <d_gain>1.0</d_gain>
-        <cmd_max>20</cmd_max>
-        <cmd_min>-20</cmd_min>
-        <initial_position>0.0</initial_position>
+        <d_gain>10.0</d_gain>
+        <cmd_max>50</cmd_max>
+        <cmd_min>-50</cmd_min>
+        <!-- -0.5 rad = pre-bent knee: stable crouching stance at spawn.
+             Straight knees (0.0) create an unstable equilibrium — any tiny
+             nudge causes the leg to buckle sideways and the robot collapses. -->
+        <initial_position>-0.5</initial_position>
       </plugin>
     </gazebo>
   </xacro:macro>
@@ -415,7 +432,7 @@
     <plugin filename="gz-sim-joint-position-controller-system"
             name="gz::sim::systems::JointPositionController">
       <joint_name>head_joint</joint_name>
-      <topic>/model/robodog/joint/head_joint/cmd_pos</topic>
+      <topic>/model/${gz_model}/joint/head_joint/cmd_pos</topic>
       <p_gain>10</p_gain>
       <i_gain>0.1</i_gain>
       <d_gain>0.5</d_gain>
@@ -509,24 +526,24 @@
        y_offset: positive = left side, negative = right side.
   -->
 
-  <!-- Front Left -->
+  <!-- Front Left: near the front of the body (+x), on the left side (+y) -->
   <xacro:leg prefix="front_left"
-             x_offset="${body_length/2 - 0.04}"    <!-- Near front, left side  -->
+             x_offset="${body_length/2 - 0.04}"
              y_offset="${body_width/2}"/>
 
-  <!-- Front Right -->
+  <!-- Front Right: near the front of the body (+x), on the right side (-y) -->
   <xacro:leg prefix="front_right"
-             x_offset="${body_length/2 - 0.04}"    <!-- Near front, right side -->
+             x_offset="${body_length/2 - 0.04}"
              y_offset="${-body_width/2}"/>
 
-  <!-- Rear Left -->
+  <!-- Rear Left: near the rear of the body (-x), on the left side (+y) -->
   <xacro:leg prefix="rear_left"
-             x_offset="${-body_length/2 + 0.04}"   <!-- Near rear, left side   -->
+             x_offset="${-body_length/2 + 0.04}"
              y_offset="${body_width/2}"/>
 
-  <!-- Rear Right -->
+  <!-- Rear Right: near the rear of the body (-x), on the right side (-y) -->
   <xacro:leg prefix="rear_right"
-             x_offset="${-body_length/2 + 0.04}"   <!-- Near rear, right side  -->
+             x_offset="${-body_length/2 + 0.04}"
              y_offset="${-body_width/2}"/>
 
   <!-- ==================== GLOBAL GAZEBO PLUGINS ====================

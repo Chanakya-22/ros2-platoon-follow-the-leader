@@ -98,19 +98,33 @@ def generate_launch_description():
     # This package contains the launch file that starts Gazebo itself.
 
 
-    # ── LOAD THE ROBOT DESCRIPTION (URDF) ─────────────────────────────────────
+    # ── LOAD THE ROBOT DESCRIPTIONS (TWO SEPARATE URDFs) ──────────────────────
+    #
+    # WHY TWO SEPARATE URDFs?
+    # The URDF contains JointPositionController plugins whose <topic> tag must
+    # match the Gazebo model name so messages reach the right robot.
+    # Leader  → controllers listen on /model/leader/joint/*/cmd_pos
+    # Follower → controllers listen on /model/follower/joint/*/cmd_pos
+    #
+    # We pass 'gz_model_name' as a xacro argument so each URDF gets the correct
+    # model name baked in.  xacro.process_file() + mappings does the substitution.
 
     xacro_file = os.path.join(pkg_robodog, 'urdf', 'robodog.urdf.xacro')
-    # Build the full path to the robot description file.
-    # os.path.join combines folder names safely:
-    # e.g. /home/.../br2_robodog/ + urdf/ + robodog.urdf.xacro
+    # Path to the shared xacro template (both robots use the same template file).
 
-    robot_description_xml = xacro.process_file(xacro_file).toxml()
-    # Step 1: xacro.process_file() reads the .xacro file and EXPANDS all the macros.
-    #         (The leg macro is called 4 times, properties like body_length get substituted, etc.)
-    # Step 2: .toxml() converts the result into a plain XML string.
-    # The result is a complete URDF robot description that Gazebo and ROS can understand.
-    # BOTH the leader and follower use this SAME description — they are identical robots.
+    leader_description_xml = xacro.process_file(
+        xacro_file, mappings={'gz_model_name': 'leader'}
+    ).toxml()
+    # Generate the LEADER URDF: gz_model_name='leader'
+    # → JointPositionController topics become /model/leader/joint/*/cmd_pos
+    # → walk_cmd_vel (leader namespace) publishes to /model/leader/joint/*/cmd_pos ✓
+
+    follower_description_xml = xacro.process_file(
+        xacro_file, mappings={'gz_model_name': 'follower'}
+    ).toxml()
+    # Generate the FOLLOWER URDF: gz_model_name='follower'
+    # → JointPositionController topics become /model/follower/joint/*/cmd_pos
+    # → walk_cmd_vel (follower namespace) publishes to /model/follower/joint/*/cmd_pos ✓
 
 
     # ── WORLD FILE ────────────────────────────────────────────────────────────
@@ -149,7 +163,7 @@ def generate_launch_description():
         arguments=[
             '-name',   'leader',       # Name the Gazebo model "leader"
                                        #   → its topics become /model/leader/...
-            '-string', robot_description_xml,  # Give it the URDF as a text string
+            '-string', leader_description_xml,  # Leader URDF: /model/leader/joint/... topics
             '-x', '0.0',               # Spawn at X = 0 metres (no left/right offset)
             '-y', '0.0',               # Spawn at Y = 0 metres (no forward/backward offset)
             '-z', '0.35'               # Spawn at Z = 0.35 metres (35cm above ground)
@@ -168,7 +182,7 @@ def generate_launch_description():
         namespace='leader',                    # All topics this node uses go under /leader/
         output='screen',
         parameters=[{
-            'robot_description': robot_description_xml,  # The full URDF XML string
+            'robot_description': leader_description_xml,  # Leader URDF
             'use_sim_time': True,     # Use Gazebo's clock instead of real wall-clock time
             'frame_prefix': 'leader/'
             # Prefix all TF frame names with "leader/".
@@ -191,7 +205,7 @@ def generate_launch_description():
         executable='create',
         arguments=[
             '-name',   'follower',     # Gazebo model name = "follower"
-            '-string', robot_description_xml,
+            '-string', follower_description_xml,  # Follower URDF: /model/follower/joint/... topics
             '-x', '-1.5',             # 1.5 metres behind the leader (negative X)
             '-y',  '0.0',
             '-z',  '0.35'
@@ -207,7 +221,7 @@ def generate_launch_description():
         namespace='follower',          # All topics under /follower/
         output='screen',
         parameters=[{
-            'robot_description': robot_description_xml,
+            'robot_description': follower_description_xml,  # Follower URDF
             'use_sim_time': True,
             'frame_prefix': 'follower/'  # TF frames: "follower/base_link", etc.
         }],
@@ -304,10 +318,10 @@ def generate_launch_description():
                 output='screen',
                 parameters=[{
                     'gz_model_name': 'leader',
-                    # Tells walk_cmd_vel which Gazebo model to send joint commands to.
-                    # It publishes to: /model/leader/joint/*/cmd_pos
-                    'base_gait_frequency': 1.5,  # Step cadence: 1.5 steps per second
-                    'update_rate': 50.0,          # Run the gait loop at 50 Hz
+                    'base_gait_frequency': 2.0,   # Faster cadence to compensate for smaller strides
+                    'base_hip_amplitude': 0.25,    # Reduced: smaller strides = less body sway
+                    'knee_amplitude': 0.4,          # Reduced: less foot lift = more ground contact
+                    'update_rate': 50.0,
                 }],
             )
         ]
@@ -324,8 +338,10 @@ def generate_launch_description():
                 # Subscribes to /follower/cmd_vel automatically
                 output='screen',
                 parameters=[{
-                    'gz_model_name': 'follower',  # Publishes to /model/follower/joint/*/cmd_pos
-                    'base_gait_frequency': 1.5,
+                    'gz_model_name': 'follower',
+                    'base_gait_frequency': 2.0,
+                    'base_hip_amplitude': 0.25,
+                    'knee_amplitude': 0.4,
                     'update_rate': 50.0,
                 }],
             )
@@ -361,9 +377,10 @@ def generate_launch_description():
                 ],
                 parameters=[{
                     # These override the default values declared in follower_controller.py.
-                    'lookahead_dist': 1.0,  # Aim 1 metre ahead on the path
-                    'k_v': 0.8,             # Linear speed gain (how fast to chase)
-                    'k_w': 1.2,             # Angular speed gain (how sharply to turn)
+                    'lookahead_dist': 1.5,  # Larger lookahead = smoother, less jerky path following
+                    'k_v': 0.6,             # Linear speed gain (slightly reduced for stability)
+                    'k_w': 0.5,             # Angular gain REDUCED: gentler turns = no joint hard-stop hits
+                    # k_w × max_error (π rad) = 1.57, clamped to ±0.5 → very smooth correction
                 }]
             )
         ]
