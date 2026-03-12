@@ -1,4 +1,4 @@
-# ROS 2 Platoon Follow the Leader (Robodog Edition)
+# ROS 2 Platoon Follow the Leader (Robodog-Edition)
 
 This project implements a leader-follower platoon system using two simulated Robodogs in ROS 2 and Gazebo Harmonic. The leader Robodog can be controlled manually via keyboard teleoperation, while the follower autonomously tracks and maintains a safe distance behind the leader.
 
